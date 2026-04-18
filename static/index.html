@@ -975,6 +975,1131 @@ function renderAnalysis(data) {
   if (data.tables && data.tables.length > 0) {
     let tablesHtml = '';
     data.tables.slice(0, 3).forEach((t, i) => {
+        const allRows = t.data || [];
+        if (!allRows.length) return;
+        const firstRow = allRows[0] || [];
+        const hasHeaders = firstRow.some(h => h && isNaN(String(h).trim()) && h.trim().length > 0);
+        let thead, tbody;
+        if (hasHeaders && allRows.length > 1) {
+          thead = firstRow.map(h => `<th>${escHtml(h || '')}</th>`).join('');
+          tbody = allRows.slice(1).map(r => `<tr>${r.map(c => `<td>${escHtml(c || '')}</td>`).join('')}</tr>`).join('');
+        } else {
+          const cols = firstRow.length || 1;
+          thead = Array.from({length: cols}, (_, i) => `<th>Column ${i+1}</th>`).join('');
+          tbody = allRows.map(r => `<tr>${r.map(c => `<td>${escHtml(c || '')}</td>`).join('')}</tr>`).join('');
+        }
+        tablesHtml += `
+        <div style="margin-bottom:14px">
+          <div style="font-size:0.68rem;color:var(--muted);margin-bottom:6px">Table ${i+1} — Page ${t.page}</div>
+          <div class="table-container">
+            <table class="doc-table"><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table>
+          </div>
+        </div>`;
+    });
+    cards.push(`
+      <div class="card" style="grid-column: 1 / -1; animation-delay:0.4s">
+        <div class="card-header">
+          <span class="card-icon">📊</span>
+          <span class="card-title">Extracted Tables</span>
+          <span class="card-badge blue">${data.tables.length} table${data.tables.length>1?'s':''}</span>
+        </div>
+        ${tablesHtml}
+      </div>`);
+  }
+
+  container.innerHTML = cards.join('');
+  document.getElementById('analyzeResults').classList.add('show');
+}
+
+// ── QA ────────────────────────────────────────────────────────
+async function runQA() {
+  const file = document.getElementById('qaFileInput').files[0];
+  const question = document.getElementById('qaQuestion').value.trim();
+  if (!file || !question) return;
+
+  const btn = document.getElementById('qaBtn');
+  const errBox = document.getElementById('qaError');
+  const answerBox = document.getElementById('qaAnswerBox');
+
+  btn.disabled = true;
+  btn.textContent = '⏳';
+  errBox.classList.remove('show');
+  answerBox.classList.remove('show');
+
+  const fd = new FormData();
+  fd.append('file', file);
+  fd.append('question', question);
+
+  try {
+    const res = await fetch(`${BASE}/qa`, { method:'POST', body: fd });
+    const data = await res.json();
+
+    if (!data.success) {
+      showError('qaError', data.error || 'QA failed.');
+    } else {
+      document.getElementById('qaQ').textContent = '❓ ' + data.question;
+      document.getElementById('qaA').textContent = data.answer;
+      document.getElementById('qaConf').textContent =
+        `Confidence: ${(data.confidence*100).toFixed(1)}% · ${data.processing_time_ms}ms`;
+      answerBox.classList.add('show');
+    }
+  } catch(e) {
+    showError('qaError', 'Network error — is the API running?');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Ask →';
+  }
+}
+
+// Allow Enter key in QA input
+document.getElementById('qaQuestion').addEventListener('keydown', e => {
+  if (e.key === 'Enter') runQA();
+});
+
+// ── COMPARE ───────────────────────────────────────────────────
+async function runCompare() {
+  const f1 = document.getElementById('cmpFile1').files[0];
+  const f2 = document.getElementById('cmpFile2').files[0];
+  if (!f1 || !f2) return;
+
+  const btn = document.getElementById('compareBtn');
+  const errBox = document.getElementById('compareError');
+  const results = document.getElementById('compareResults');
+  const prog = document.getElementById('compareProgress');
+
+  btn.disabled = true;
+  btn.textContent = '⏳ Comparing…';
+  errBox.classList.remove('show');
+  results.classList.remove('show');
+  prog.classList.add('show');
+
+  // Animate bar
+  const bar = document.getElementById('cmpProgressBar');
+  let pct = 0;
+  const progInt = setInterval(() => { pct = Math.min(pct + 3, 90); bar.style.width = pct + '%'; }, 200);
+
+  const fd = new FormData();
+  fd.append('file1', f1);
+  fd.append('file2', f2);
+
+  try {
+    const res = await fetch(`${BASE}/compare`, { method:'POST', body: fd });
+    const data = await res.json();
+    clearInterval(progInt); bar.style.width = '100%';
+    setTimeout(() => prog.classList.remove('show'), 600);
+
+    if (!data.success) {
+      showError('compareError', data.error || 'Compare failed.');
+    } else {
+      renderCompare(data);
+    }
+  } catch(e) {
+    clearInterval(progInt);
+    prog.classList.remove('show');
+    showError('compareError', 'Network error — is the API running?');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🔍 Compare Documents';
+  }
+}
+
+function renderCompare(data) {
+  const container = document.getElementById('compareCards');
+  const scoreColor = data.similarity_score >= 0.75 ? 'var(--accent3)' :
+                     data.similarity_score >= 0.5  ? 'var(--warn)'   : 'var(--danger)';
+
+  const commonTags  = (data.common_keywords||[]).map(w=>`<span class="entity-tag names">${escHtml(w)}</span>`).join('');
+  const only1Tags   = (data.unique_to_doc1||[]).map(w=>`<span class="entity-tag dates">${escHtml(w)}</span>`).join('');
+  const only2Tags   = (data.unique_to_doc2||[]).map(w=>`<span class="entity-tag amounts">${escHtml(w)}</span>`).join('');
+
+  container.innerHTML = `
+    <div class="cards">
+      <div class="card" style="animation-delay:0s;text-align:center">
+        <div class="card-header"><span class="card-icon">📊</span><span class="card-title">Similarity Score</span></div>
+        <div class="sim-number" style="font-family:'Syne',sans-serif;font-size:3.5rem;font-weight:800;color:${scoreColor}">
+          ${(data.similarity_score*100).toFixed(1)}%
+        </div>
+        <div style="font-size:0.8rem;color:var(--muted);margin-top:6px">${escHtml(data.similarity_label)} similarity</div>
+        <div class="conf-bar-wrap" style="margin-top:12px">
+          <div class="conf-bar-bg"><div class="conf-bar positive" style="width:${data.similarity_score*100}%;background:${scoreColor}"></div></div>
+        </div>
+      </div>
+      <div class="card" style="animation-delay:0.05s">
+        <div class="card-header"><span class="card-icon">📋</span><span class="card-title">Word Counts</span></div>
+        <div class="meta-grid">
+          <div class="meta-item"><div class="meta-val">${(data.doc1_word_count||0).toLocaleString()}</div><div class="meta-key">Doc 1 Words</div></div>
+          <div class="meta-item"><div class="meta-val">${(data.doc2_word_count||0).toLocaleString()}</div><div class="meta-key">Doc 2 Words</div></div>
+        </div>
+      </div>
+      <div class="card" style="animation-delay:0.1s;grid-column:1/-1">
+        <div class="card-header"><span class="card-icon">🔗</span><span class="card-title">Common Keywords</span></div>
+        <div class="entity-tags">${commonTags || '<span style="color:var(--muted);font-size:0.78rem">None found</span>'}</div>
+      </div>
+      <div class="card" style="animation-delay:0.15s">
+        <div class="card-header"><span class="card-icon">📄</span><span class="card-title">Unique to Doc 1</span></div>
+        <div class="entity-tags">${only1Tags || '<span style="color:var(--muted);font-size:0.78rem">None</span>'}</div>
+      </div>
+      <div class="card" style="animation-delay:0.2s">
+        <div class="card-header"><span class="card-icon">📄</span><span class="card-title">Unique to Doc 2</span></div>
+        <div class="entity-tags">${only2Tags || '<span style="color:var(--muted);font-size:0.78rem">None</span>'}</div>
+      </div>
+    </div>`;
+  document.getElementById('compareResults').classList.add('show');
+}
+
+// ── Utils ─────────────────────────────────────────────────────
+function escHtml(str) {
+  if (str === null || str === undefined || str === '') return '<span style="color:var(--border)">—</span>';
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+</script>
+</body>
+</html>
+
+    position: fixed; inset: 0; z-index: 0;
+    background-image:
+      linear-gradient(rgba(0,212,255,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,212,255,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+  }
+
+  /* ── Orb background ── */
+  .orb {
+    position: fixed; border-radius: 50%;
+    filter: blur(80px); pointer-events: none; z-index: 0;
+    animation: drift 12s ease-in-out infinite alternate;
+  }
+  .orb1 { width:500px; height:500px; top:-150px; left:-100px; background:rgba(0,212,255,0.06); }
+  .orb2 { width:400px; height:400px; bottom:-100px; right:-80px; background:rgba(124,58,237,0.07); animation-delay: -6s; }
+  @keyframes drift { from { transform: translate(0,0) scale(1); } to { transform: translate(30px,20px) scale(1.05); } }
+
+  /* ── Layout ── */
+  .wrap { position: relative; z-index: 1; max-width: 1100px; margin: 0 auto; padding: 0 20px; }
+
+  /* ── Header ── */
+  header {
+    border-bottom: 1px solid var(--border);
+    background: rgba(8,12,20,0.85);
+    backdrop-filter: blur(20px);
+    position: sticky; top: 0; z-index: 100;
+  }
+  .header-inner {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 18px 0;
+  }
+  .logo {
+    font-family: 'Syne', sans-serif;
+    font-size: 1.25rem; font-weight: 800;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    letter-spacing: -0.02em;
+  }
+  .logo span { font-weight: 400; opacity: 0.6; }
+  .badge {
+    font-size: 0.65rem; padding: 4px 10px;
+    border: 1px solid var(--border);
+    border-radius: 20px; color: var(--muted);
+    letter-spacing: 0.1em; text-transform: uppercase;
+  }
+
+  /* ── Hero ── */
+  .hero { padding: 60px 0 40px; text-align: center; }
+  .hero h1 {
+    font-family: 'Syne', sans-serif;
+    font-size: clamp(2rem, 5vw, 3.5rem);
+    font-weight: 800; line-height: 1.1;
+    background: linear-gradient(135deg, #fff 30%, var(--accent) 100%);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    margin-bottom: 14px;
+  }
+  .hero p {
+    color: var(--muted); font-size: 0.9rem;
+    max-width: 500px; margin: 0 auto 30px;
+    line-height: 1.7;
+  }
+  .feature-pills {
+    display: flex; flex-wrap: wrap; gap: 8px;
+    justify-content: center; margin-bottom: 10px;
+  }
+  .pill {
+    font-size: 0.68rem; padding: 5px 12px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 20px; color: var(--muted);
+    transition: all 0.2s;
+  }
+  .pill:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* ── Tabs ── */
+  .tabs {
+    display: flex; gap: 4px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 4px;
+    margin: 0 auto 30px; width: fit-content;
+  }
+  .tab {
+    font-family: 'Syne', sans-serif; font-size: 0.8rem; font-weight: 600;
+    padding: 8px 20px; border-radius: 8px;
+    border: none; cursor: pointer;
+    background: transparent; color: var(--muted);
+    transition: all 0.2s; letter-spacing: 0.02em;
+  }
+  .tab.active {
+    background: linear-gradient(135deg, rgba(0,212,255,0.15), rgba(124,58,237,0.15));
+    color: var(--accent); border: 1px solid rgba(0,212,255,0.3);
+  }
+
+  /* ── Panels ── */
+  .panel { display: none; }
+  .panel.active { display: block; }
+
+  /* ── Upload Zone ── */
+  .upload-zone {
+    border: 2px dashed var(--border);
+    border-radius: 16px; padding: 50px 30px;
+    text-align: center; cursor: pointer;
+    transition: all 0.3s;
+    background: var(--surface);
+    position: relative; overflow: hidden;
+  }
+  .upload-zone::before {
+    content: '';
+    position: absolute; inset: 0;
+    background: linear-gradient(135deg, rgba(0,212,255,0.03), rgba(124,58,237,0.03));
+    opacity: 0; transition: opacity 0.3s;
+  }
+  .upload-zone:hover, .upload-zone.drag { border-color: var(--accent); }
+  .upload-zone:hover::before, .upload-zone.drag::before { opacity: 1; }
+  .upload-icon {
+    font-size: 3rem; margin-bottom: 16px;
+    display: block;
+    animation: float 3s ease-in-out infinite;
+  }
+  @keyframes float { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+  .upload-zone h3 {
+    font-family: 'Syne', sans-serif; font-size: 1.1rem; font-weight: 700;
+    margin-bottom: 6px;
+  }
+  .upload-zone p { color: var(--muted); font-size: 0.78rem; }
+  .upload-zone input { display: none; }
+  .file-types {
+    display: flex; gap: 8px; justify-content: center; margin-top: 16px; flex-wrap: wrap;
+  }
+  .ftype {
+    font-size: 0.65rem; padding: 3px 10px;
+    border-radius: 4px; font-weight: 500;
+  }
+  .ftype.pdf { background:rgba(239,68,68,0.15); color:#ef4444; border:1px solid rgba(239,68,68,0.3); }
+  .ftype.docx { background:rgba(59,130,246,0.15); color:#3b82f6; border:1px solid rgba(59,130,246,0.3); }
+  .ftype.img { background:rgba(16,185,129,0.15); color:#10b981; border:1px solid rgba(16,185,129,0.3); }
+
+  /* ── File Preview ── */
+  .file-preview {
+    display: none; align-items: center; gap: 14px;
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 10px; padding: 14px 18px; margin-top: 14px;
+  }
+  .file-preview.show { display: flex; }
+  .file-icon { font-size: 1.8rem; }
+  .file-info { flex: 1; }
+  .file-name { font-size: 0.85rem; font-weight: 500; margin-bottom: 2px; }
+  .file-size { font-size: 0.7rem; color: var(--muted); }
+  .file-remove {
+    background: none; border: none; color: var(--muted);
+    cursor: pointer; font-size: 1.2rem;
+    transition: color 0.2s;
+  }
+  .file-remove:hover { color: var(--danger); }
+
+  /* ── Btn ── */
+  .btn {
+    font-family: 'Syne', sans-serif; font-size: 0.85rem; font-weight: 700;
+    padding: 12px 28px; border-radius: 10px;
+    border: none; cursor: pointer;
+    transition: all 0.2s; letter-spacing: 0.02em;
+    display: inline-flex; align-items: center; gap: 8px;
+  }
+  .btn-primary {
+    background: linear-gradient(135deg, var(--accent), #0099cc);
+    color: #000; width: 100%; justify-content: center;
+    margin-top: 14px; font-size: 0.9rem;
+    box-shadow: 0 4px 20px rgba(0,212,255,0.3);
+  }
+  .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 6px 28px rgba(0,212,255,0.4); }
+  .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+  .btn-secondary {
+    background: var(--surface2); color: var(--text);
+    border: 1px solid var(--border); font-size: 0.8rem;
+    padding: 8px 16px;
+  }
+
+  /* ── Question input ── */
+  .qa-input-group { display: flex; gap: 10px; margin-top: 14px; }
+  .qa-input {
+    flex: 1; background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 10px; padding: 12px 16px;
+    color: var(--text); font-family: 'JetBrains Mono', monospace;
+    font-size: 0.82rem; outline: none;
+    transition: border-color 0.2s;
+  }
+  .qa-input:focus { border-color: var(--accent); }
+  .qa-input::placeholder { color: var(--muted); }
+
+  /* ── Progress ── */
+  .progress-wrap { display: none; margin-top: 20px; }
+  .progress-wrap.show { display: block; }
+  .progress-label {
+    font-size: 0.72rem; color: var(--accent); margin-bottom: 8px;
+    display: flex; justify-content: space-between;
+  }
+  .progress-bar-bg {
+    height: 4px; background: var(--border); border-radius: 4px; overflow: hidden;
+  }
+  .progress-bar {
+    height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent2));
+    border-radius: 4px; transition: width 0.4s ease;
+    width: 0%;
+  }
+  .progress-steps {
+    display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px;
+  }
+  .pstep {
+    font-size: 0.65rem; padding: 3px 8px; border-radius: 4px;
+    background: var(--surface2); border: 1px solid var(--border);
+    color: var(--muted); transition: all 0.3s;
+  }
+  .pstep.done { background: rgba(16,185,129,0.1); border-color: var(--accent3); color: var(--accent3); }
+  .pstep.active { background: rgba(0,212,255,0.1); border-color: var(--accent); color: var(--accent); animation: pulse 1s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.5; } }
+
+  /* ── Results ── */
+  .results { display: none; margin-top: 30px; }
+  .results.show { display: block; }
+
+  .results-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 20px; padding-bottom: 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  .results-title {
+    font-family: 'Syne', sans-serif; font-size: 1.1rem; font-weight: 700;
+  }
+  .results-meta { font-size: 0.7rem; color: var(--muted); }
+
+  /* Cards grid */
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 14px; padding: 20px;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    animation: fadeUp 0.4s ease both;
+  }
+  .card:hover { border-color: rgba(0,212,255,0.2); box-shadow: var(--glow); }
+  @keyframes fadeUp { from { opacity:0; transform: translateY(16px); } to { opacity:1; transform: translateY(0); } }
+  .card-header {
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 14px; padding-bottom: 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  .card-icon { font-size: 1.2rem; }
+  .card-title {
+    font-family: 'Syne', sans-serif; font-size: 0.82rem;
+    font-weight: 700; letter-spacing: 0.05em;
+    text-transform: uppercase; color: var(--muted);
+  }
+  .card-badge {
+    margin-left: auto; font-size: 0.6rem; padding: 2px 8px;
+    border-radius: 4px; border: 1px solid;
+  }
+  .card-badge.green { color: var(--accent3); border-color: var(--accent3); background: rgba(16,185,129,0.1); }
+  .card-badge.blue  { color: var(--accent);  border-color: var(--accent);  background: rgba(0,212,255,0.1); }
+  .card-badge.purple{ color: #a78bfa;         border-color: #a78bfa;        background: rgba(124,58,237,0.1); }
+
+  /* Specific card content */
+  .summary-text {
+    font-size: 0.82rem; line-height: 1.8; color: #b0c4d8;
+  }
+
+  .sentiment-wrap { text-align: center; padding: 10px 0; }
+  .sentiment-label {
+    font-family: 'Syne', sans-serif; font-size: 2rem; font-weight: 800;
+    margin-bottom: 6px;
+  }
+  .sentiment-label.positive { color: var(--accent3); }
+  .sentiment-label.negative { color: var(--danger); }
+  .conf-bar-wrap { margin-top: 10px; }
+  .conf-label { font-size: 0.68rem; color: var(--muted); margin-bottom: 4px; display: flex; justify-content: space-between; }
+  .conf-bar-bg { height: 6px; background: var(--border); border-radius: 4px; overflow: hidden; }
+  .conf-bar { height: 100%; border-radius: 4px; transition: width 1s ease; }
+  .conf-bar.positive { background: linear-gradient(90deg, var(--accent3), #34d399); }
+  .conf-bar.negative { background: linear-gradient(90deg, var(--danger), #f87171); }
+  .conf-bar.neutral  { background: linear-gradient(90deg, var(--warn), #fbbf24); }
+
+  .lang-display { text-align: center; padding: 8px 0; }
+  .lang-name { font-family: 'Syne', sans-serif; font-size: 1.6rem; font-weight: 700; color: var(--accent); }
+  .lang-code { font-size: 0.7rem; color: var(--muted); margin-top: 4px; }
+
+  /* Metadata grid */
+  .meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .meta-item { background: var(--surface2); border-radius: 8px; padding: 10px 12px; }
+  .meta-val { font-family: 'Syne', sans-serif; font-size: 1.2rem; font-weight: 700; color: var(--accent); }
+  .meta-key { font-size: 0.62rem; color: var(--muted); margin-top: 2px; text-transform: uppercase; letter-spacing: 0.05em; }
+
+  /* Keywords */
+  .kw-list { display: flex; flex-direction: column; gap: 7px; }
+  .kw-item { display: flex; align-items: center; gap: 10px; }
+  .kw-word { font-size: 0.78rem; min-width: 120px; }
+  .kw-bar-bg { flex: 1; height: 4px; background: var(--border); border-radius: 4px; overflow: hidden; }
+  .kw-bar { height: 100%; background: linear-gradient(90deg, var(--accent2), var(--accent)); border-radius: 4px; }
+  .kw-score { font-size: 0.65rem; color: var(--muted); min-width: 36px; text-align: right; }
+
+  /* Entities */
+  .entity-section { margin-bottom: 12px; }
+  .entity-type { font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); margin-bottom: 6px; }
+  .entity-tags { display: flex; flex-wrap: wrap; gap: 5px; }
+  .entity-tag {
+    font-size: 0.72rem; padding: 3px 10px; border-radius: 6px;
+    border: 1px solid;
+  }
+  .entity-tag.names        { color:#60a5fa; border-color:rgba(96,165,250,0.3); background:rgba(96,165,250,0.08); }
+  .entity-tag.organizations{ color:#a78bfa; border-color:rgba(167,139,250,0.3); background:rgba(167,139,250,0.08); }
+  .entity-tag.locations    { color:#34d399; border-color:rgba(52,211,153,0.3); background:rgba(52,211,153,0.08); }
+  .entity-tag.dates        { color:#fbbf24; border-color:rgba(251,191,36,0.3); background:rgba(251,191,36,0.08); }
+  .entity-tag.amounts      { color:#f87171; border-color:rgba(248,113,113,0.3); background:rgba(248,113,113,0.08); }
+  .entity-tag.other        { color:var(--muted); border-color:var(--border); background:var(--surface2); }
+
+  /* Topic */
+  .topic-main {
+    font-family: 'Syne', sans-serif; font-size: 1.3rem; font-weight: 800;
+    color: var(--accent); margin-bottom: 14px;
+  }
+  .topic-list { display: flex; flex-direction: column; gap: 7px; }
+  .topic-item { display: flex; align-items: center; gap: 10px; }
+  .topic-label { font-size: 0.72rem; min-width: 160px; }
+  .topic-bar-bg { flex: 1; height: 4px; background: var(--border); border-radius: 4px; overflow: hidden; }
+  .topic-bar { height: 100%; background: linear-gradient(90deg, var(--accent2), var(--accent)); border-radius: 4px; }
+  .topic-score { font-size: 0.65rem; color: var(--muted); min-width: 36px; text-align: right; }
+
+  /* Tables */
+  .table-container { overflow-x: auto; }
+  .doc-table {
+    width: 100%; border-collapse: collapse; font-size: 0.72rem; margin-top: 10px;
+  }
+  .doc-table th {
+    background: var(--surface2); padding: 8px 12px;
+    text-align: left; border-bottom: 1px solid var(--border);
+    color: var(--accent); font-family: 'Syne', sans-serif;
+    font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  .doc-table td {
+    padding: 7px 12px; border-bottom: 1px solid var(--border);
+    color: var(--text);
+  }
+  .doc-table tr:last-child td { border-bottom: none; }
+  .doc-table tr:hover td { background: var(--surface2); }
+
+  /* QA result */
+  .qa-answer-box {
+    background: var(--surface2); border: 1px solid rgba(0,212,255,0.2);
+    border-radius: 10px; padding: 18px; margin-top: 14px;
+    display: none;
+  }
+  .qa-answer-box.show { display: block; }
+  .qa-q { font-size: 0.72rem; color: var(--muted); margin-bottom: 8px; }
+  .qa-a { font-size: 0.95rem; color: var(--text); line-height: 1.6; font-family: 'Syne', sans-serif; font-weight: 600; }
+  .qa-conf { font-size: 0.68rem; color: var(--accent3); margin-top: 8px; }
+
+  /* Compare */
+  .compare-files { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+  .sim-score-big { text-align: center; padding: 30px; }
+  .sim-number {
+    font-family: 'Syne', sans-serif; font-size: 3.5rem; font-weight: 800;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .sim-label-text { font-size: 0.8rem; color: var(--muted); margin-top: 4px; }
+
+  /* Error */
+  .error-box {
+    background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.3);
+    border-radius: 10px; padding: 14px 18px; margin-top: 14px;
+    font-size: 0.8rem; color: #f87171; display: none;
+  }
+  .error-box.show { display: block; }
+
+  /* Reading time */
+  .reading-time-big { text-align: center; padding: 10px 0; }
+  .rt-number { font-family: 'Syne', sans-serif; font-size: 2rem; font-weight: 800; color: var(--warn); }
+  .rt-label { font-size: 0.72rem; color: var(--muted); margin-top: 4px; }
+
+  /* ── Footer ── */
+  footer {
+    text-align: center; padding: 40px 0 30px;
+    color: var(--muted); font-size: 0.68rem;
+    border-top: 1px solid var(--border); margin-top: 60px;
+  }
+  footer a { color: var(--accent); text-decoration: none; }
+
+  /* Responsive */
+  @media (max-width: 600px) {
+    .compare-files { grid-template-columns: 1fr; }
+    .meta-grid { grid-template-columns: 1fr 1fr; }
+    .cards { grid-template-columns: 1fr; }
+    .hero h1 { font-size: 1.8rem; }
+    .tabs { flex-wrap: wrap; }
+  }
+</style>
+</head>
+<body>
+
+<div class="orb orb1"></div>
+<div class="orb orb2"></div>
+
+<!-- Header -->
+<header>
+  <div class="wrap header-inner">
+    <div class="logo">AI·DOC<span> ANALYZER</span></div>
+    <div style="display:flex;gap:10px;align-items:center">
+      <a href="/docs" target="_blank" class="badge">SWAGGER API</a>
+      <div id="healthDot" style="width:8px;height:8px;border-radius:50%;background:var(--muted);" title="checking..."></div>
+    </div>
+  </div>
+</header>
+
+<!-- Hero -->
+<div class="wrap">
+  <div class="hero">
+    <h1>Analyze Any Document<br/>with AI</h1>
+    <p>Upload a PDF, DOCX, or image. Get instant AI-powered insights — summaries, entities, sentiment, keywords and more.</p>
+    <div class="feature-pills">
+      <span class="pill">📄 PDF Extraction</span>
+      <span class="pill">📝 DOCX Parsing</span>
+      <span class="pill">🖼️ OCR</span>
+      <span class="pill">🤖 AI Summary</span>
+      <span class="pill">🏷️ NER</span>
+      <span class="pill">💬 Chat with Doc</span>
+      <span class="pill">📊 Table Extract</span>
+      <span class="pill">🔍 Comparison</span>
+      <span class="pill">🌍 Lang Detection</span>
+      <span class="pill">📈 Confidence Scores</span>
+    </div>
+  </div>
+
+  <!-- Tabs -->
+  <div class="tabs">
+    <button class="tab active" onclick="switchTab('analyze')">🔬 Analyze</button>
+    <button class="tab" onclick="switchTab('qa')">💬 Q&A</button>
+    <button class="tab" onclick="switchTab('compare')">🔍 Compare</button>
+  </div>
+
+  <!-- ═══════════════════════════════════════ ANALYZE PANEL -->
+  <div id="panel-analyze" class="panel active">
+    <div class="upload-zone" id="dropzone" onclick="document.getElementById('fileInput').click()"
+         ondragover="handleDragOver(event)" ondrop="handleDrop(event,'fileInput')" ondragleave="this.classList.remove('drag')">
+      <span class="upload-icon">📂</span>
+      <h3>Drop your document here</h3>
+      <p>or click to browse — PDF, DOCX, PNG, JPG, TIFF, BMP, WEBP</p>
+      <div class="file-types">
+        <span class="ftype pdf">PDF</span>
+        <span class="ftype docx">DOCX</span>
+        <span class="ftype img">IMAGE</span>
+      </div>
+      <input type="file" id="fileInput" accept=".pdf,.docx,.doc,.png,.jpg,.jpeg,.bmp,.tiff,.webp" onchange="handleFile(this,'analyzePreview')"/>
+    </div>
+
+    <div class="file-preview" id="analyzePreview">
+      <span class="file-icon" id="analyzeIcon">📄</span>
+      <div class="file-info">
+        <div class="file-name" id="analyzeName">-</div>
+        <div class="file-size" id="analyzeSize">-</div>
+      </div>
+      <button class="file-remove" onclick="clearFile('fileInput','analyzePreview','analyzeResults')">✕</button>
+    </div>
+
+    <div class="error-box" id="analyzeError"></div>
+
+    <button class="btn btn-primary" id="analyzeBtn" onclick="runAnalyze()" disabled>
+      ⚡ Run Full Analysis
+    </button>
+
+    <div class="progress-wrap" id="analyzeProgress">
+      <div class="progress-label">
+        <span id="progressText">Initializing…</span>
+        <span id="progressPct">0%</span>
+      </div>
+      <div class="progress-bar-bg"><div class="progress-bar" id="progressBar"></div></div>
+      <div class="progress-steps">
+        <span class="pstep" id="ps1">Extract Text</span>
+        <span class="pstep" id="ps2">Metadata</span>
+        <span class="pstep" id="ps3">Summarize</span>
+        <span class="pstep" id="ps4">Sentiment</span>
+        <span class="pstep" id="ps5">Entities</span>
+        <span class="pstep" id="ps6">Keywords</span>
+        <span class="pstep" id="ps7">Topic</span>
+        <span class="pstep" id="ps8">Done</span>
+      </div>
+    </div>
+
+    <!-- Results -->
+    <div class="results" id="analyzeResults">
+      <div class="results-header">
+        <div class="results-title">📊 Analysis Results</div>
+        <div class="results-meta" id="resultsMeta"></div>
+      </div>
+      <div class="cards" id="cardsContainer"></div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════ QA PANEL -->
+  <div id="panel-qa" class="panel">
+    <div class="upload-zone" onclick="document.getElementById('qaFileInput').click()"
+         ondragover="handleDragOver(event)" ondrop="handleDrop(event,'qaFileInput')" ondragleave="this.classList.remove('drag')">
+      <span class="upload-icon">💬</span>
+      <h3>Upload document to chat with</h3>
+      <p>Then ask any question about its content</p>
+      <div class="file-types">
+        <span class="ftype pdf">PDF</span>
+        <span class="ftype docx">DOCX</span>
+        <span class="ftype img">IMAGE</span>
+      </div>
+      <input type="file" id="qaFileInput" accept=".pdf,.docx,.doc,.png,.jpg,.jpeg,.bmp,.tiff,.webp" onchange="handleFile(this,'qaPreview')"/>
+    </div>
+
+    <div class="file-preview" id="qaPreview">
+      <span class="file-icon" id="qaIcon">📄</span>
+      <div class="file-info">
+        <div class="file-name" id="qaName">-</div>
+        <div class="file-size" id="qaSize">-</div>
+      </div>
+      <button class="file-remove" onclick="clearFile('qaFileInput','qaPreview','qaAnswerBox')">✕</button>
+    </div>
+
+    <div class="qa-input-group">
+      <input class="qa-input" id="qaQuestion" type="text" placeholder="e.g. What is the main conclusion of this document?" />
+      <button class="btn btn-secondary" id="qaBtn" onclick="runQA()" disabled>Ask →</button>
+    </div>
+
+    <div class="error-box" id="qaError"></div>
+
+    <div class="qa-answer-box" id="qaAnswerBox">
+      <div class="qa-q" id="qaQ"></div>
+      <div class="qa-a" id="qaA"></div>
+      <div class="qa-conf" id="qaConf"></div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════ COMPARE PANEL -->
+  <div id="panel-compare" class="panel">
+    <div class="compare-files">
+      <div>
+        <div class="upload-zone" onclick="document.getElementById('cmpFile1').click()"
+             ondragover="handleDragOver(event)" ondrop="handleDrop(event,'cmpFile1')" ondragleave="this.classList.remove('drag')" style="padding:30px 20px">
+          <span class="upload-icon" style="font-size:2rem">📄</span>
+          <h3 style="font-size:0.9rem">Document 1</h3>
+          <p style="font-size:0.72rem">Click to upload</p>
+          <input type="file" id="cmpFile1" accept=".pdf,.docx,.doc,.png,.jpg,.jpeg,.bmp,.tiff,.webp" onchange="handleFile(this,'cmp1Preview')"/>
+        </div>
+        <div class="file-preview" id="cmp1Preview">
+          <span class="file-icon" id="cmp1Icon">📄</span>
+          <div class="file-info"><div class="file-name" id="cmp1Name">-</div><div class="file-size" id="cmp1Size">-</div></div>
+          <button class="file-remove" onclick="clearFile('cmpFile1','cmp1Preview','compareResults')">✕</button>
+        </div>
+      </div>
+      <div>
+        <div class="upload-zone" onclick="document.getElementById('cmpFile2').click()"
+             ondragover="handleDragOver(event)" ondrop="handleDrop(event,'cmpFile2')" ondragleave="this.classList.remove('drag')" style="padding:30px 20px">
+          <span class="upload-icon" style="font-size:2rem">📄</span>
+          <h3 style="font-size:0.9rem">Document 2</h3>
+          <p style="font-size:0.72rem">Click to upload</p>
+          <input type="file" id="cmpFile2" accept=".pdf,.docx,.doc,.png,.jpg,.jpeg,.bmp,.tiff,.webp" onchange="handleFile(this,'cmp2Preview')"/>
+        </div>
+        <div class="file-preview" id="cmp2Preview">
+          <span class="file-icon" id="cmp2Icon">📄</span>
+          <div class="file-info"><div class="file-name" id="cmp2Name">-</div><div class="file-size" id="cmp2Size">-</div></div>
+          <button class="file-remove" onclick="clearFile('cmpFile2','cmp2Preview','compareResults')">✕</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="error-box" id="compareError"></div>
+
+    <button class="btn btn-primary" id="compareBtn" onclick="runCompare()" disabled>
+      🔍 Compare Documents
+    </button>
+
+    <div class="progress-wrap" id="compareProgress">
+      <div class="progress-label"><span>Comparing documents…</span></div>
+      <div class="progress-bar-bg"><div class="progress-bar" id="cmpProgressBar" style="width:0%"></div></div>
+    </div>
+
+    <div class="results" id="compareResults">
+      <div class="results-header">
+        <div class="results-title">🔍 Comparison Results</div>
+      </div>
+      <div id="compareCards"></div>
+    </div>
+  </div>
+
+</div><!-- /wrap -->
+
+<footer>
+  <div class="wrap">
+    <p>AI Document Analyzer &nbsp;·&nbsp; Built by <a href="https://github.com/techcode20" target="_blank">Khanishka</a> &nbsp;·&nbsp; <a href="/docs" target="_blank">Swagger API Docs</a></p>
+  </div>
+</footer>
+
+<script>
+// ── BASE URL auto-detect ──────────────────────────────────────
+const BASE = window.location.origin;
+
+// ── Health check ─────────────────────────────────────────────
+async function checkHealth() {
+  try {
+    const r = await fetch(`${BASE}/health`);
+    const d = await r.json();
+    const dot = document.getElementById('healthDot');
+    if (d.success) {
+      dot.style.background = '#10b981';
+      dot.title = 'API Online ✅';
+    }
+  } catch {
+    document.getElementById('healthDot').style.background = '#ef4444';
+    document.getElementById('healthDot').title = 'API Offline ❌';
+  }
+}
+checkHealth();
+setInterval(checkHealth, 30000);
+
+// ── Tab switching ─────────────────────────────────────────────
+function switchTab(name) {
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('panel-' + name).classList.add('active');
+  event.target.classList.add('active');
+}
+
+// ── Drag & drop ───────────────────────────────────────────────
+function handleDragOver(e) {
+  e.preventDefault();
+  e.currentTarget.classList.add('drag');
+}
+function handleDrop(e, inputId) {
+  e.preventDefault();
+  e.currentTarget.classList.remove('drag');
+  const file = e.dataTransfer.files[0];
+  if (!file) return;
+  const input = document.getElementById(inputId);
+  const dt = new DataTransfer();
+  dt.items.add(file);
+  input.files = dt.files;
+  input.dispatchEvent(new Event('change'));
+}
+
+// ── File handler ──────────────────────────────────────────────
+const ICONS = { pdf: '📕', docx: '📘', doc: '📘', png: '🖼️', jpg: '🖼️', jpeg: '🖼️', bmp: '🖼️', tiff: '🖼️', webp: '🖼️' };
+
+function handleFile(input, previewId) {
+  const file = input.files[0];
+  if (!file) return;
+  const ext = file.name.split('.').pop().toLowerCase();
+  const preview = document.getElementById(previewId);
+  const base = previewId.replace('Preview','');
+  document.getElementById(base+'Icon').textContent = ICONS[ext] || '📄';
+  document.getElementById(base+'Name').textContent = file.name;
+  document.getElementById(base+'Size').textContent = formatBytes(file.size);
+  preview.classList.add('show');
+
+  // Enable buttons
+  if (previewId === 'analyzePreview') {
+    document.getElementById('analyzeBtn').disabled = false;
+  }
+  if (previewId === 'qaPreview') updateQABtn();
+  if (previewId === 'cmp1Preview' || previewId === 'cmp2Preview') updateCmpBtn();
+}
+
+function clearFile(inputId, previewId, resultsId) {
+  document.getElementById(inputId).value = '';
+  document.getElementById(previewId).classList.remove('show');
+  if (resultsId) {
+    document.getElementById(resultsId).classList.remove('show');
+  }
+  const base = previewId.replace('Preview','');
+  if (base === 'analyze') document.getElementById('analyzeBtn').disabled = true;
+  if (base === 'qa') { document.getElementById('qaBtn').disabled = true; }
+  updateCmpBtn();
+}
+
+function updateQABtn() {
+  const hasFile = document.getElementById('qaFileInput').files.length > 0;
+  document.getElementById('qaBtn').disabled = !hasFile;
+}
+function updateCmpBtn() {
+  const f1 = document.getElementById('cmpFile1').files.length > 0;
+  const f2 = document.getElementById('cmpFile2').files.length > 0;
+  document.getElementById('compareBtn').disabled = !(f1 && f2);
+}
+
+document.getElementById('qaQuestion').addEventListener('input', updateQABtn);
+
+function formatBytes(b) {
+  if (b < 1024) return b + ' B';
+  if (b < 1048576) return (b/1024).toFixed(1) + ' KB';
+  return (b/1048576).toFixed(1) + ' MB';
+}
+
+// ── Progress animation ────────────────────────────────────────
+const STEPS = [
+  { id:'ps1', label:'Extracting text…',    pct: 15 },
+  { id:'ps2', label:'Computing metadata…', pct: 28 },
+  { id:'ps3', label:'Summarizing…',        pct: 45 },
+  { id:'ps4', label:'Sentiment analysis…', pct: 58 },
+  { id:'ps5', label:'Entity extraction…',  pct: 70 },
+  { id:'ps6', label:'Keywords…',           pct: 80 },
+  { id:'ps7', label:'Topic classification…', pct: 92 },
+  { id:'ps8', label:'Finishing…',          pct: 100 },
+];
+let _progressInterval = null;
+
+function startProgress() {
+  const wrap = document.getElementById('analyzeProgress');
+  wrap.classList.add('show');
+  STEPS.forEach(s => { document.getElementById(s.id).className = 'pstep'; });
+  let step = 0;
+  setProgress(0, 'Starting…');
+
+  _progressInterval = setInterval(() => {
+    if (step < STEPS.length) {
+      if (step > 0) document.getElementById(STEPS[step-1].id).className = 'pstep done';
+      document.getElementById(STEPS[step].id).className = 'pstep active';
+      setProgress(STEPS[step].pct, STEPS[step].label);
+      step++;
+    }
+  }, 900);
+}
+
+function stopProgress() {
+  clearInterval(_progressInterval);
+  STEPS.forEach(s => { document.getElementById(s.id).className = 'pstep done'; });
+  setProgress(100, 'Complete!');
+  setTimeout(() => {
+    document.getElementById('analyzeProgress').classList.remove('show');
+  }, 800);
+}
+
+function setProgress(pct, label) {
+  document.getElementById('progressBar').style.width = pct + '%';
+  document.getElementById('progressText').textContent = label;
+  document.getElementById('progressPct').textContent = pct + '%';
+}
+
+// ── ANALYZE ──────────────────────────────────────────────────
+async function runAnalyze() {
+  const file = document.getElementById('fileInput').files[0];
+  if (!file) return;
+
+  const btn = document.getElementById('analyzeBtn');
+  const errBox = document.getElementById('analyzeError');
+  const results = document.getElementById('analyzeResults');
+
+  btn.disabled = true;
+  btn.textContent = '⏳ Analyzing…';
+  errBox.classList.remove('show');
+  results.classList.remove('show');
+  startProgress();
+
+  const fd = new FormData();
+  fd.append('file', file);
+
+  try {
+    const res = await fetch(`${BASE}/analyze`, { method:'POST', body: fd });
+    const data = await res.json();
+    stopProgress();
+
+    if (!data.success) {
+      showError('analyzeError', data.error || 'Analysis failed.');
+    } else {
+      renderAnalysis(data);
+    }
+  } catch(e) {
+    stopProgress();
+    showError('analyzeError', 'Network error — is the API running? Check the health indicator.');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '⚡ Run Full Analysis';
+  }
+}
+
+function showError(id, msg) {
+  const el = document.getElementById(id);
+  el.textContent = '❌ ' + msg;
+  el.classList.add('show');
+}
+
+// ── Render analysis results ───────────────────────────────────
+function renderAnalysis(data) {
+  const container = document.getElementById('cardsContainer');
+  const meta = data.metadata || {};
+  const totalMs = data.total_processing_time_ms;
+
+  document.getElementById('resultsMeta').textContent =
+    `${data.filename} · ${data.file_type.toUpperCase()} · ${totalMs}ms`;
+
+  container.innerHTML = '';
+
+  const cards = [];
+
+  // ── Summary card
+  if (data.summary) {
+    cards.push(`
+      <div class="card" style="grid-column: 1 / -1; animation-delay:0s">
+        <div class="card-header">
+          <span class="card-icon">🤖</span>
+          <span class="card-title">AI Summary</span>
+          <span class="card-badge blue">CONF ${(data.summary.confidence*100).toFixed(0)}%</span>
+        </div>
+        <div class="summary-text">${escHtml(data.summary.summary)}</div>
+      </div>`);
+  }
+
+  // ── Metadata card
+  cards.push(`
+    <div class="card" style="animation-delay:0.05s">
+      <div class="card-header">
+        <span class="card-icon">⚡</span>
+        <span class="card-title">Document Metadata</span>
+      </div>
+      <div class="meta-grid">
+        <div class="meta-item"><div class="meta-val">${(meta.word_count||0).toLocaleString()}</div><div class="meta-key">Words</div></div>
+        <div class="meta-item"><div class="meta-val">${(meta.sentence_count||0).toLocaleString()}</div><div class="meta-key">Sentences</div></div>
+        <div class="meta-item"><div class="meta-val">${(meta.unique_word_count||0).toLocaleString()}</div><div class="meta-key">Unique Words</div></div>
+        <div class="meta-item"><div class="meta-val">${meta.lexical_diversity||0}</div><div class="meta-key">Lexical Diversity</div></div>
+        ${meta.page_count !== undefined ? `<div class="meta-item"><div class="meta-val">${meta.page_count}</div><div class="meta-key">Pages</div></div>` : ''}
+        <div class="meta-item"><div class="meta-val">${meta.avg_sentence_length||0}</div><div class="meta-key">Avg Sent Length</div></div>
+      </div>
+    </div>`);
+
+  // ── Reading time
+  const rt = meta.reading_time || {};
+  cards.push(`
+    <div class="card" style="animation-delay:0.1s">
+      <div class="card-header">
+        <span class="card-icon">⏱️</span>
+        <span class="card-title">Reading Time</span>
+      </div>
+      <div class="reading-time-big">
+        <div class="rt-number">${escHtml(rt.label || '—')}</div>
+        <div class="rt-label">at ${rt.based_on_wpm||200} words/min</div>
+      </div>
+    </div>`);
+
+  // ── Sentiment card
+  if (data.sentiment) {
+    const s = data.sentiment;
+    const cls = s.label === 'POSITIVE' ? 'positive' : 'negative';
+    cards.push(`
+      <div class="card" style="animation-delay:0.15s">
+        <div class="card-header">
+          <span class="card-icon">😊</span>
+          <span class="card-title">Sentiment</span>
+          <span class="card-badge ${cls === 'positive' ? 'green' : 'purple'}">${(s.confidence*100).toFixed(1)}%</span>
+        </div>
+        <div class="sentiment-wrap">
+          <div class="sentiment-label ${cls}">${s.label}</div>
+          <div class="conf-bar-wrap">
+            <div class="conf-label"><span>Confidence</span><span>${(s.confidence*100).toFixed(1)}%</span></div>
+            <div class="conf-bar-bg"><div class="conf-bar ${cls}" style="width:${s.confidence*100}%"></div></div>
+          </div>
+        </div>
+      </div>`);
+  }
+
+  // ── Language card
+  if (data.language) {
+    const l = data.language;
+    cards.push(`
+      <div class="card" style="animation-delay:0.2s">
+        <div class="card-header">
+          <span class="card-icon">🌍</span>
+          <span class="card-title">Language</span>
+          <span class="card-badge blue">${(l.confidence*100).toFixed(0)}% CONF</span>
+        </div>
+        <div class="lang-display">
+          <div class="lang-name">${escHtml(l.language_name)}</div>
+          <div class="lang-code">ISO code: ${escHtml(l.language_code)}</div>
+        </div>
+      </div>`);
+  }
+
+  // ── Topic card
+  if (data.topic) {
+    const t = data.topic;
+    const topScores = (t.all_scores || []).slice(0, 6);
+    const rows = topScores.map(ts => `
+      <div class="topic-item">
+        <span class="topic-label">${escHtml(ts.label)}</span>
+        <div class="topic-bar-bg"><div class="topic-bar" style="width:${ts.score*100}%"></div></div>
+        <span class="topic-score">${(ts.score*100).toFixed(0)}%</span>
+      </div>`).join('');
+    cards.push(`
+      <div class="card" style="animation-delay:0.25s">
+        <div class="card-header">
+          <span class="card-icon">🏷️</span>
+          <span class="card-title">Topic Classification</span>
+          <span class="card-badge purple">${(t.confidence*100).toFixed(0)}%</span>
+        </div>
+        <div class="topic-main">${escHtml(t.top_topic)}</div>
+        <div class="topic-list">${rows}</div>
+      </div>`);
+  }
+
+  // ── Keywords card
+  if (data.keywords && data.keywords.keywords) {
+    const kws = data.keywords.keywords.slice(0, 12);
+    const rows = kws.map(k => `
+      <div class="kw-item">
+        <span class="kw-word">${escHtml(k.word)}</span>
+        <div class="kw-bar-bg"><div class="kw-bar" style="width:${k.score*100}%"></div></div>
+        <span class="kw-score">${(k.score*100).toFixed(0)}%</span>
+      </div>`).join('');
+    cards.push(`
+      <div class="card" style="animation-delay:0.3s">
+        <div class="card-header">
+          <span class="card-icon">🎯</span>
+          <span class="card-title">Keywords (TF-IDF)</span>
+        </div>
+        <div class="kw-list">${rows}</div>
+      </div>`);
+  }
+
+  // ── Entities card
+  if (data.entities && data.entities.entities) {
+    const e = data.entities.entities;
+    let sections = '';
+    const cats = ['names','organizations','locations','dates','amounts','other'];
+    cats.forEach(cat => {
+      const items = e[cat] || [];
+      if (!items.length) return;
+      const tags = items.slice(0, 10).map(i => `<span class="entity-tag ${cat}">${escHtml(i.text)}</span>`).join('');
+      sections += `<div class="entity-section"><div class="entity-type">${cat}</div><div class="entity-tags">${tags}</div></div>`;
+    });
+    cards.push(`
+      <div class="card" style="animation-delay:0.35s">
+        <div class="card-header">
+          <span class="card-icon">🏷️</span>
+          <span class="card-title">Named Entities</span>
+          <span class="card-badge green">${data.entities.total_count} found</span>
+        </div>
+        ${sections || '<span style="color:var(--muted);font-size:0.78rem">No entities detected.</span>'}
+      </div>`);
+  }
+
+  // ── Tables card (PDF only)
+  if (data.tables && data.tables.length > 0) {
+    let tablesHtml = '';
+    data.tables.slice(0, 3).forEach((t, i) => {
       const headers = t.data[0] || [];
       const rows = t.data.slice(1);
       const thead = headers.map(h => `<th>${escHtml(h)}</th>`).join('');
