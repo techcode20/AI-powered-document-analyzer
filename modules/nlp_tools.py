@@ -7,6 +7,12 @@ from groq import Groq
 # Set your Groq API key here OR use environment variable
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "your-groq-api-key-here")
 
+
+KEYWORD_NOISE = {"don", "born", "read", "book", "crazy", "just", "like", 
+                 "make", "thing", "also", "even", "much", "many", "back",
+                 "still", "well", "long", "come", "got", "let", "good",
+                 "isbn", "tel", "gu32", "vii", "viii", "said", "say"}
+
 _nlp_model = None
 _zero_shot_pipeline = None
 
@@ -105,7 +111,7 @@ def extract_keywords(text: str, top_n: int = 15) -> dict:
         EXTRA_STOPS = {
             "using","used","use","also","one","two","three","may","well",
             "will","would","could","like","make","made","get","got","good",
-            "work","worked","working","year","years","month","months","time",
+            "work","worked","working","year","years","month","months","time","don","born","read","book","crazy","isbn","tel","gu32","vii","viii","ix","xi","xii","said","say","says","come","want","know","think","going","put","man","men","new","old",
             "summary","objective","experience","education","skills","project",
             "projects","certificate","certificates","certification","resume",
             "name","email","phone","address","linkedin","github","profile",
@@ -143,7 +149,7 @@ TOPIC_LABELS = [
 
 def classify_topic(text: str) -> dict:
     start = time.time()
-    sample = str(text)[:1500]
+    sample = str(text)[:3000]
     # Use Groq for topic classification — faster and no caching issues
     import os, json
     from groq import Groq
@@ -194,7 +200,7 @@ JSON:"""
   }
   
 
-ENTITY_NOISE = {"wi-fi","wifi","isbn","cip","publisher","author","copyright","printed","edition"}
+ENTITY_NOISE = {"wi-fi","wifi","isbn","cip","tel","gu32","vii","viii","ix","xi","xii","publisher","author","copyright","printed","edition"}
 
 def clean_other_entities(others):
     return [e for e in others if e.lower() not in ENTITY_NOISE and len(e) > 2]
