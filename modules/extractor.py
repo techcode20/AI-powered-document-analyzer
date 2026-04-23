@@ -46,14 +46,18 @@ def extract_pdf(file_bytes: bytes) -> dict:
             tables = page.extract_tables()
             for table in tables:
                 if table:
-                    cleaned_table = []
+                    # Filter out completely empty tables
+                    non_empty_rows = []
                     for row in table:
                         cleaned_row = [cell.strip() if cell else "" for cell in row]
-                        cleaned_table.append(cleaned_row)
-                    all_tables.append({
-                        "page": page_num,
-                        "data": cleaned_table
-                    })
+                        # Only keep rows that have at least one non-empty cell
+                        if any(c for c in cleaned_row):
+                            non_empty_rows.append(cleaned_row)
+                    if non_empty_rows:
+                        all_tables.append({
+                            "page": page_num,
+                            "data": non_empty_rows
+                        })
 
     elapsed_ms = round((time.time() - start) * 1000, 2)
 

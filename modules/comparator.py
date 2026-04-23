@@ -16,7 +16,7 @@ def _get_model():
     global _embed_model
     if _embed_model is None:
         print("[comparator] Loading sentence-transformer model…")
-        _embed_model = SentenceTransformer("all-MiniLM-L6-v2")
+        _embed_model = SentenceTransformer("all-MiniLM-L6-v2")  # loaded once at startup via app.py
     return _embed_model
 
 

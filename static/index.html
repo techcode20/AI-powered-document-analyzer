@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
 <title>AI Document Analyzer</title>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet"/>
 <style>
@@ -426,6 +426,57 @@
     .hero h1 { font-size: 1.8rem; }
     .tabs { flex-wrap: wrap; }
   }
+
+  /* ── MOBILE FIXES ── */
+  @media (max-width: 768px) {
+    .wrap { padding: 0 12px; }
+    .hero { padding: 30px 0 20px; }
+    .hero h1 { font-size: 1.6rem; }
+    .hero p { font-size: 0.8rem; }
+    .feature-pills { gap: 5px; }
+    .pill { font-size: 0.62rem; padding: 4px 8px; }
+    .tabs { width: 100%; justify-content: center; }
+    .tab { font-size: 0.72rem; padding: 7px 12px; }
+    .upload-zone { padding: 30px 15px; }
+    .upload-icon { font-size: 2rem; }
+    .upload-zone h3 { font-size: 0.95rem; }
+    .upload-zone p { font-size: 0.72rem; }
+    .btn-primary { font-size: 0.82rem; padding: 11px 20px; }
+    .cards { grid-template-columns: 1fr !important; }
+    .card { padding: 14px; }
+    .card-title { font-size: 0.75rem; }
+    .meta-grid { grid-template-columns: 1fr 1fr; }
+    .meta-val { font-size: 1rem; }
+    .compare-files { grid-template-columns: 1fr !important; }
+    .results-header { flex-direction: column; gap: 6px; }
+    .sim-number { font-size: 2.5rem !important; }
+    .lang-name { font-size: 1.2rem; }
+    .sentiment-label { font-size: 1.5rem; }
+    .topic-main { font-size: 1rem; }
+    .topic-label { min-width: 120px; font-size: 0.68rem; }
+    .kw-word { min-width: 90px; font-size: 0.72rem; }
+    .header-inner { padding: 12px 0; }
+    .logo { font-size: 1rem; }
+    .badge { font-size: 0.58rem; padding: 3px 7px; }
+    .qa-input-group { flex-direction: column; }
+    .qa-input { width: 100%; }
+    .btn-secondary { width: 100%; justify-content: center; }
+    .results-meta { font-size: 0.65rem; }
+    .card-badge { font-size: 0.55rem; }
+    .summary-text { font-size: 0.78rem; }
+    .rt-number { font-size: 1.6rem; }
+    .entity-tag { font-size: 0.68rem; padding: 2px 8px; }
+    .progress-steps { gap: 4px; }
+    .pstep { font-size: 0.6rem; padding: 2px 6px; }
+    footer { font-size: 0.65rem; padding: 25px 0 20px; }
+  }
+
+  @media (max-width: 400px) {
+    .hero h1 { font-size: 1.35rem; }
+    .tab { font-size: 0.65rem; padding: 6px 8px; }
+    .meta-grid { grid-template-columns: 1fr 1fr; gap: 6px; }
+  }
+
 </style>
 </head>
 <body>

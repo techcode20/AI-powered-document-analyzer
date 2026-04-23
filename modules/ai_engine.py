@@ -1,3 +1,58 @@
+
+def _detect_doc_type(text: str) -> str:
+    text_lower = text.lower()
+    opinion_signals = [
+        "i believe", "i think", "i feel", "happiness",
+        "fear", "love", "hate", "amazing", "terrible",
+        "story", "anecdote", "lesson", "mindset",
+        "you should", "the best", "the worst"
+    ]
+    formal_signals = [
+        "whereas", "hereby", "pursuant", "therefore",
+        "section", "clause", "regulation", "the party",
+        "agreement", "terms and conditions"
+    ]
+    opinion_count = sum(1 for s in opinion_signals if s in text_lower)
+    formal_count = sum(1 for s in formal_signals if s in text_lower)
+    if formal_count >= 3 and formal_count > opinion_count:
+        return "formal"
+    return "opinion"
+
+import re
+
+def _is_noise_amount(value):
+    val = value.strip()
+    if re.match(r'^97[89][0-9\-]{10,}$', val): return True
+    if re.match(r'^[+]?[0-9 ()\-.]{7,}$', val) and len(val) > 8: return True
+    return False
+
+import re as _re
+
+def _clean_text_for_summary(text: str) -> str:
+    """Remove noise before sending to AI — emails, phones, URLs, symbols"""
+    # Remove emails
+    text = _re.sub(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', '', text)
+    # Remove URLs
+    text = _re.sub(r'http[s]?://\S+', '', text)
+    # Remove phone numbers
+    text = _re.sub(r'[\+]?[0-9][\s\-\.]?[(]?[0-9]{3}[)]?[\s\-\.]?[0-9]{3}[\s\-\.]?[0-9]{4,}', '', text)
+    # Remove LinkedIn/GitHub URLs
+    text = _re.sub(r'(linkedin|github)\.com/\S+', '', text)
+    # Remove lines that are just symbols or single words (headers)
+    lines = text.split('\n')
+    clean_lines = []
+    for line in lines:
+        stripped = line.strip()
+        # Skip very short lines (likely headers/labels)
+        if len(stripped) < 15 and stripped.isupper():
+            continue
+        # Skip lines with mostly special characters
+        alpha_ratio = sum(c.isalpha() for c in stripped) / max(len(stripped), 1)
+        if alpha_ratio < 0.4 and len(stripped) > 0:
+            continue
+        clean_lines.append(line)
+    return '\n'.join(clean_lines).strip()
+
 """
 ai_engine.py
 ------------
