@@ -865,7 +865,8 @@ async function runAnalyze() {
     if (!data.success) {
       showError('analyzeError', data.error || 'Analysis failed.');
     } else {
-      renderAnalysis(data);
+      window.lastResults=data;
+renderAnalysis(data);
     }
   } catch(e) {
     stopProgress();
