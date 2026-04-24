@@ -150,17 +150,29 @@ def _top_chunks(question: str, chunks: list, top_k: int = 5) -> list:
         return chunks[:top_k]
 
 
-def answer_question(context: str, question: str) -> dict:
+def answer_question(context: str, question: str, history: list = None) -> dict:
     start  = time.time()
     chunks = _split_chunks(context)
     tops   = _top_chunks(question, chunks)
     ctx    = " ".join(tops)
-    out = _ask(
+    
+    # Build conversation history string
+    history_str = ""
+    if history:
+        for turn in history[-4:]:  # last 4 turns max
+            history_str += f"User: {turn['question']}\nAssistant: {turn['answer']}\n\n"
+    
+    prompt = (
         "Answer the question using ONLY the document excerpt below.\n"
         "Give a detailed, specific answer in 3-5 sentences.\n"
         "If the answer is not present say: 'This information is not found in the document.'\n\n"
-        f"Question: {question}\n\nDocument excerpt:\n{ctx[:3000]}\n\nAnswer:",
-        max_tokens=350)
+        f"Document excerpt:\n{ctx[:2500]}\n\n"
+    )
+    if history_str:
+        prompt += f"Previous conversation:\n{history_str}\n"
+    prompt += f"Question: {question}\n\nAnswer:"
+    
+    out = _ask(prompt, max_tokens=350)
     if not out:
         out = "Could not find a specific answer. Try rephrasing your question."
     conf = 0.88 if out and "not found in the document" not in out.lower() else 0.2

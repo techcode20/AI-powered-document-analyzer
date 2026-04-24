@@ -11,6 +11,7 @@ Endpoints:
 """
 
 import os
+import json
 import time
 import traceback
 
@@ -312,6 +313,11 @@ def qa():
 
     file     = request.files["file"]
     question = request.form["question"].strip()
+    history_raw = request.form.get("history", "[]")
+    try:
+        history = json.loads(history_raw)
+    except:
+        history = []
 
     if not allowed_file(file.filename):
         return error_response("Unsupported file type.")
@@ -326,7 +332,7 @@ def qa():
         if not text or len(text.strip()) < 10:
             return error_response("Could not extract text from document.")
 
-        result = answer_question(text, question)
+        result = answer_question(text, question, history=history)
 
         return success_response({
             "question":  question,

@@ -493,6 +493,41 @@
     border:none; border-radius:10px; cursor:pointer; letter-spacing:1px;
 }
 .download-btn:hover{opacity:0.85;}
+
+#chatMessages {
+    max-height: 350px;
+    overflow-y: auto;
+    padding: 10px;
+    margin: 10px 0;
+    border: 1px solid rgba(0,245,160,0.2);
+    border-radius: 10px;
+    background: rgba(0,0,0,0.3);
+}
+.chat-user {
+    background: rgba(0,217,245,0.1);
+    padding: 10px 14px;
+    border-radius: 10px;
+    margin: 8px 0;
+    color: #00d9f5;
+}
+.chat-bot {
+    background: rgba(0,245,160,0.1);
+    padding: 10px 14px;
+    border-radius: 10px;
+    margin: 8px 0;
+    color: #00f5a0;
+}
+.clear-chat-btn {
+    background: none;
+    border: 1px solid #ef4444;
+    color: #ef4444;
+    padding: 6px 16px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 12px;
+    margin-bottom: 10px;
+}
+
 </style>
 </head>
 <body>
@@ -1243,6 +1278,61 @@ function downloadResults(){
     a.href=url; a.download="ai_doc_results.json"; a.click();
     URL.revokeObjectURL(url);
 }
+
+// ── Q&A Chat History ─────────────────────────────────────────
+let qaHistory = [];
+let qaDocFile = null;
+
+function resetQAHistory() {
+    qaHistory = [];
+    document.getElementById('chatMessages') && 
+    (document.getElementById('chatMessages').innerHTML = '');
+}
+
+function addChatMessage(role, text) {
+    const box = document.getElementById('chatMessages');
+    if (!box) return;
+    const div = document.createElement('div');
+    div.className = role === 'user' ? 'chat-user' : 'chat-bot';
+    div.innerHTML = `<strong>${role === 'user' ? '🧑 You' : '🤖 AI'}:</strong> ${text}`;
+    box.appendChild(div);
+    box.scrollTop = box.scrollHeight;
+}
+
+async function askQuestion() {
+    const questionEl = document.getElementById('qaQuestion');
+    const fileEl = document.getElementById('qaFile');
+    const question = questionEl?.value?.trim();
+    
+    if (!question) { alert('Enter a question!'); return; }
+    if (!fileEl?.files[0] && !qaDocFile) { alert('Upload a document first!'); return; }
+    
+    if (fileEl?.files[0]) qaDocFile = fileEl.files[0];
+    
+    addChatMessage('user', question);
+    questionEl.value = '';
+    
+    const fd = new FormData();
+    fd.append('file', qaDocFile);
+    fd.append('question', question);
+    fd.append('history', JSON.stringify(qaHistory));
+    
+    try {
+        const res = await fetch(`${BASE}/qa`, { method: 'POST', body: fd });
+        const data = await res.json();
+        if (data.success) {
+            const answer = data.data?.answer || data.answer || 'No answer found.';
+            addChatMessage('bot', answer);
+            qaHistory.push({ question, answer });
+            if (qaHistory.length > 10) qaHistory.shift();
+        } else {
+            addChatMessage('bot', 'Error: ' + (data.error || 'Something went wrong'));
+        }
+    } catch(e) {
+        addChatMessage('bot', 'Network error. Check API status.');
+    }
+}
+
 </script>
 </body>
 </html>
