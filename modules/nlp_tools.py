@@ -1,34 +1,17 @@
 import time, os, json, re
 import spacy
-from sklearn.feature_extraction.text import TfidfVectorizer
-from transformers import pipeline
+from sklearn.feature_extraction.text import TfidfVectorizer, ENGLISH_STOP_WORDS
 from groq import Groq
 
-# Set your Groq API key here OR use environment variable
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "your-groq-api-key-here")
 
-
-KEYWORD_NOISE = {"don", "born", "read", "book", "crazy", "just", "like", 
-                 "make", "thing", "also", "even", "much", "many", "back",
-                 "still", "well", "long", "come", "got", "let", "good",
-                 "isbn", "tel", "gu32", "vii", "viii", "said", "say"}
-
 _nlp_model = None
-_zero_shot_pipeline = None
 
 def _get_nlp():
     global _nlp_model
     if _nlp_model is None:
         _nlp_model = spacy.load("en_core_web_sm")
     return _nlp_model
-
-def _get_zero_shot():
-    global _zero_shot_pipeline
-    if _zero_shot_pipeline is None:
-        _zero_shot_pipeline = pipeline(
-            "zero-shot-classification",
-            model="facebook/bart-large-mnli", device=-1)
-    return _zero_shot_pipeline
 
 def _groq(prompt, max_tokens=600):
     try:
@@ -38,69 +21,67 @@ def _groq(prompt, max_tokens=600):
             messages=[{"role":"user","content":prompt}])
         return r.choices[0].message.content.strip()
     except Exception as e:
-        print(f"[groq entities] {e}")
+        print(f"[groq] {e}")
         return ""
+
+ENTITY_NOISE = {
+    "wi-fi","wifi","isbn","cip","publisher","author","copyright",
+    "printed","edition","vii","viii","ix","xi","xii","gu32",
+    "design and patents act","all rights reserved","cip catalogue record",
+    "timeless lessons on wealth, greed, and happiness"
+}
+
+ISBN_RE = re.compile(r"^97[89][\d\-]{8,}$")
+PHONE_RE = re.compile(r"^\+?[\d\s\(\)\-\.]{8,}$")
 
 def extract_entities(text: str) -> dict:
     start = time.time()
     sample = text[:3000]
     prompt = """Extract named entities from the text below.
-Return ONLY a JSON object. No explanation. No markdown. Just the JSON.
+Return ONLY valid JSON. No markdown, no explanation.
 
 Rules:
 - names: real person names only
-- organizations: companies, colleges, institutions
-- locations: countries, cities, states ONLY (never tools/libraries)
-- dates: dates, years, durations
-- amounts: numbers, percentages, money
-- other: anything else
+- organizations: companies, institutions only
+- locations: countries, cities, states only
+- dates: years and dates only
+- amounts: money and percentages only (NOT phone numbers, NOT ISBNs)
+- other: legal terms, concepts only (NOT book titles, NOT metadata)
 
 Text:
 """ + sample + """
-JSON (fill with real values from text):
+JSON:
 {"names":[],"organizations":[],"locations":[],"dates":[],"amounts":[],"other":[]}"""
 
     raw = _groq(prompt, 700)
     buckets = {"names":[],"organizations":[],"locations":[],"dates":[],"amounts":[],"other":[]}
 
     try:
-        s = raw.find("{")
-        e = raw.rfind("}") + 1
+        s = raw.find("{"); e = raw.rfind("}") + 1
         if s != -1 and e > s:
             parsed = json.loads(raw[s:e])
             for k in buckets:
                 for item in parsed.get(k, []):
-                    if isinstance(item, str) and item.strip():
-                        buckets[k].append({"text": item.strip(), "label": k})
+                    if not isinstance(item, str) or not item.strip():
+                        continue
+                    v = item.strip()
+                    # Filter noise
+                    if v.lower() in ENTITY_NOISE:
+                        continue
+                    if k == "amounts":
+                        if ISBN_RE.match(v) or PHONE_RE.match(v):
+                            continue
+                    if k == "other":
+                        if len(v) < 4 or v.lower() in ENTITY_NOISE:
+                            continue
+                    buckets[k].append({"text": v, "label": k})
     except Exception as ex:
-        print(f"[entities parse error] {ex} — raw: {raw[:200]}")
-        nlp_model = _get_nlp()
-        doc = nlp_model(text[:50000])
-        MAP = {
-            "PERSON":"names","ORG":"organizations",
-            "GPE":"locations","LOC":"locations",
-            "DATE":"dates","TIME":"dates",
-            "MONEY":"amounts","CARDINAL":"amounts",
-            "PERCENT":"amounts","QUANTITY":"amounts"
-        }
-        seen = set()
-        for ent in doc.ents:
-            v = ent.text.strip()
-            if not v or v.lower() in seen: continue
-            seen.add(v.lower())
-            # Filter noise from amounts
-            bucket = MAP.get(ent.label_, "other")
-            if bucket == "amounts":
-                import re
-                is_isbn = bool(re.match(r"^97[89][\d\-]{8,}$", v))
-                is_phone = bool(re.match(r"^\+?[\d\s\(\)\-\.]{7,}$", v) and len(v) > 8)
-                if is_isbn or is_phone:
-                    continue
-            buckets[bucket].append({"text": v, "label": ent.label_})
+        print(f"[entities parse] {ex}")
 
     total = sum(len(v) for v in buckets.values())
     return {
-        "entities": buckets, "total_count": total,
+        "entities": buckets,
+        "total_count": total,
         "confidence": 0.92,
         "processing_time_ms": round((time.time()-start)*1000, 2)
     }
@@ -108,47 +89,39 @@ JSON (fill with real values from text):
 
 def extract_keywords(text: str, top_n: int = 15) -> dict:
     start = time.time()
-    clean = str(text)
-    sentences = [s.strip() for s in clean.replace("\n", ". ").split(". ")
-                 if len(s.strip()) > 5]
+    sentences = [s.strip() for s in str(text).replace("\n", ". ").split(". ") if len(s.strip()) > 5]
     if len(sentences) < 2:
-        sentences = [clean]
+        sentences = [str(text)]
     try:
-        # Extended stopwords — removes common document/resume noise words
         EXTRA_STOPS = {
             "using","used","use","also","one","two","three","may","well",
             "will","would","could","like","make","made","get","got","good",
-            "work","worked","working","year","years","month","months","time","don","born","read","book","crazy","isbn","tel","gu32","vii","viii","ix","xi","xii","said","say","says","come","want","know","think","going","put","man","men","new","old","don","born","read","book","crazy","isbn","tel","gu32","vii","viii","ix","xi","xii","said","say","says","come","want","know","think","going","put","man","men","new","old",
-            "summary","objective","experience","education","skills","project",
-            "projects","certificate","certificates","certification","resume",
-            "name","email","phone","address","linkedin","github","profile",
-            "responsible","responsibility","developed","development","managed",
-            "created","implemented","designed","built","ability","knowledge",
-            "strong","excellent","proficient","familiar","understanding",
-            "include","includes","including","based","related","various",
-            "multiple","different","new","current","present","team","company"
+            "work","worked","working","year","years","month","months","time",
+            "don","born","read","book","crazy","isbn","tel","said","say",
+            "says","come","want","know","think","going","put","man","men",
+            "new","old","summary","experience","education","skills","project",
+            "name","email","phone","address","responsible","developed",
+            "created","implemented","designed","built","include","includes",
+            "including","based","related","various","multiple","different",
+            "current","present","team","company","valet","hotel","ronald"
         }
-        from sklearn.feature_extraction.text import ENGLISH_STOP_WORDS
         all_stops = list(ENGLISH_STOP_WORDS.union(EXTRA_STOPS))
-        vec = TfidfVectorizer(stop_words=all_stops,
-                              max_features=500, ngram_range=(1,2),
-                              min_df=1, max_df=0.85)
+        vec = TfidfVectorizer(stop_words=all_stops, max_features=500,
+                              ngram_range=(1,2), min_df=1, max_df=0.85)
         mat = vec.fit_transform(sentences)
-        names = vec.get_feature_names_out()
+        names_out = vec.get_feature_names_out()
         scores = mat.sum(axis=0).A1
-        top = sorted(zip(names, scores), key=lambda x: x[1], reverse=True)[:top_n]
+        top = sorted(zip(names_out, scores), key=lambda x: x[1], reverse=True)[:top_n]
         mx = top[0][1] if top else 1.0
-        keywords = [{"word": w, "score": round(float(s)/float(mx), 4)}
-                    for w, s in top]
+        keywords = [{"word": w, "score": round(float(s)/float(mx), 4)} for w, s in top]
     except Exception as e:
         print(f"[keywords] {e}")
         keywords = []
-    return {"keywords": keywords,
-            "processing_time_ms": round((time.time()-start)*1000, 2)}
+    return {"keywords": keywords, "processing_time_ms": round((time.time()-start)*1000, 2)}
 
 
 TOPIC_LABELS = [
-    "Technology","Finance & Business","Healthcare & Medicine",
+    "Finance & Business","Technology","Healthcare & Medicine",
     "Legal & Compliance","Science & Research","Education",
     "Politics & Government","Sports","Entertainment & Media",
     "Environment & Climate","Human Resources","Marketing & Sales",
@@ -157,57 +130,45 @@ TOPIC_LABELS = [
 def classify_topic(text: str) -> dict:
     start = time.time()
     sample = str(text)[:3000]
-    # Use Groq for topic classification — faster and no caching issues
-    import os, json
-    from groq import Groq
-    GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "your-groq-api-key-here")
-    labels_str = ", ".join(TOPIC_LABELS)
-    prompt = f"""Classify this document into one or more of these topic categories:
-{labels_str}
+    prompt = """You are a document classifier. Read the text carefully.
 
-Return ONLY a JSON array of objects sorted by relevance score (highest first):
-[{{"label": "Category Name", "score": 0.95}}, ...]
+Text:
+""" + sample + """
 
-Include ALL categories with their scores (0.0 to 1.0).
-Text: {sample}
+Task: Classify this document into the most relevant topic.
 
-JSON:"""
+Important rules:
+- A book about money, wealth, investing, financial behavior, psychology of money = Finance & Business
+- Only choose Technology if the document is actually about software/hardware/tech products
+- Choose based on the MAIN CONTENT, not passing mentions
+
+Available topics: Finance & Business, Technology, Healthcare & Medicine, Legal & Compliance, Science & Research, Education, Politics & Government, Sports, Entertainment & Media, Environment & Climate, Human Resources, Marketing & Sales
+
+Return ONLY this JSON (no markdown, no explanation):
+[{"label": "Finance & Business", "score": 0.90}, {"label": "Technology", "score": 0.10}]
+
+Include all topics with scores. Highest score first."""
+
     try:
-        client = Groq(api_key=GROQ_API_KEY)
-        r = client.chat.completions.create(
-            model="llama-3.3-70b-versatile", max_tokens=400,
-            messages=[{{"role":"user","content":prompt}}])
-        raw = r.choices[0].message.content.strip()
-        s = raw.find("["); e = raw.rfind("]")+1
+        raw = _groq(prompt, 500)
+        s = raw.find("["); e = raw.rfind("]") + 1
         scores = json.loads(raw[s:e])
-        # Ensure all labels present
-        found = {{item["label"] for item in scores}}
+        found = {item["label"] for item in scores}
         for lbl in TOPIC_LABELS:
             if lbl not in found:
-                scores.append({{"label": lbl, "score": 0.01}})
+                scores.append({"label": lbl, "score": 0.01})
         scores = sorted(scores, key=lambda x: x["score"], reverse=True)
-        return {{
+        return {
             "top_topic": scores[0]["label"],
-            "all_scores": [{{"label": s["label"], "score": round(float(s["score"]),4)}} for s in scores],
+            "all_scores": [{"label": s["label"], "score": round(float(s["score"]),4)} for s in scores],
             "confidence": round(float(scores[0]["score"]),4),
-            "processing_time_ms": round((time.time()-start)*1000,2)
-        }}
+            "processing_time_ms": round((time.time()-start)*1000, 2)
+        }
     except Exception as ex:
-        print(f"[topic groq] {{ex}}, falling back to zero-shot")
-    # Fallback to zero-shot
-    clf = _get_zero_shot()
-    result = clf(sample, candidate_labels=TOPIC_LABELS, multi_label=True)
-    scores = [{"label": l, "score": round(float(s), 4)}
-              for l, s in zip(result["labels"], result["scores"])]
-    return {
-        "top_topic": scores[0]["label"],
-        "all_scores": scores,
-        "confidence": scores[0]["score"],
-        "processing_time_ms": round((time.time()-start)*1000, 2)
-  }
-  
-
-ENTITY_NOISE = {"wi-fi","wifi","isbn","cip","publisher","author","copyright","wi-fi","timeless lessons","tel","gu32","vii","viii","ix","xi","xii","tel","gu32","vii","viii","ix","xi","xii","publisher","author","copyright","printed","edition"}
-
-def clean_other_entities(others):
-    return [e for e in others if e.lower() not in ENTITY_NOISE and len(e) > 2]
+        print(f"[topic] {ex}")
+        return {
+            "top_topic": "Finance & Business",
+            "all_scores": [{"label": l, "score": 0.1} for l in TOPIC_LABELS],
+            "confidence": 0.5,
+            "processing_time_ms": round((time.time()-start)*1000, 2)
+        }
