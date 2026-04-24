@@ -682,7 +682,9 @@
       <button class="btn btn-secondary" id="qaBtn" onclick="runQA()" disabled>Ask →</button>
     </div>
 
-    <div class="error-box" id="qaError"></div>
+    <button id="clearChat" onclick="clearQAChat()">🗑 Clear Chat</button>
+<div id="chatHistory"></div>
+<div class="error-box" id="qaError"></div>
 
     <div class="qa-answer-box" id="qaAnswerBox">
       <div class="qa-q" id="qaQ"></div>
@@ -1155,6 +1157,7 @@ async function runQA() {
   const fd = new FormData();
   fd.append('file', file);
   fd.append('question', question);
+  fd.append('history', JSON.stringify(_qah));
   fd.append('history', JSON.stringify(window._qaHistory || []));
 
   try {
@@ -1164,6 +1167,9 @@ async function runQA() {
     if (!data.success) {
       showError('qaError', data.error || 'QA failed.');
     } else {
+      _cm('u',question);_cm('b',data.answer);
+      _qah.push({question:question,answer:data.answer});
+      if(_qah.length>8)_qah.shift();
       document.getElementById('qaQ').textContent = '❓ ' + data.question;
       document.getElementById('qaA').textContent = data.answer;
       document.getElementById('qaConf').textContent =
@@ -1337,6 +1343,7 @@ async function askQuestion() {
     const fd = new FormData();
     fd.append('file', qaDocFile);
     fd.append('question', question);
+  fd.append('history', JSON.stringify(_qah));
     fd.append('history', JSON.stringify(qaHistory));
     
     try {
@@ -1381,6 +1388,23 @@ function clearChat() {
 
 
 
+
+var _qah=[];
+function _cm(r,t){
+    var b=document.getElementById('chatHistory');
+    b.style.display='block';
+    document.getElementById('clearChat').style.display='inline-block';
+    var d=document.createElement('div');
+    d.className=r==='u'?'cm-u':'cm-b';
+    d.innerHTML='<b>'+(r==='u'?'🧑 You':'🤖 AI')+':</b> '+t;
+    b.appendChild(d);b.scrollTop=b.scrollHeight;
+}
+function clearQAChat(){
+    _qah=[];
+    var b=document.getElementById('chatHistory');
+    b.innerHTML='';b.style.display='none';
+    document.getElementById('clearChat').style.display='none';
+}
 </script>
 </body>
 </html>
