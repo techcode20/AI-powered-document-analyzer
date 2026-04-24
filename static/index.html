@@ -485,6 +485,14 @@
     border:none; border-radius:10px; cursor:pointer; letter-spacing:1px;
 }
 .download-btn:hover{opacity:0.85;}
+
+.download-btn {
+    display:block; margin:20px auto; padding:14px 32px;
+    background:linear-gradient(135deg,#00f5a0,#00d9f5);
+    color:#000; font-weight:bold; font-size:15px;
+    border:none; border-radius:10px; cursor:pointer; letter-spacing:1px;
+}
+.download-btn:hover{opacity:0.85;}
 </style>
 </head>
 <body>
@@ -579,6 +587,8 @@
 
     <!-- Results -->
     <div class="results" id="analyzeResults">
+<button class="download-btn" onclick="downloadResults()">⬇️ Download Results as JSON</button>
+
       <div class="results-header">
         <div class="results-title">📊 Analysis Results</div>
         <div class="results-meta" id="resultsMeta"></div>
@@ -1213,6 +1223,15 @@ function escHtml(str) {
   return String(str)
     .replace(/&/g,'&amp;').replace(/</g,'&lt;')
     .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function downloadResults(){
+    if(!window.lastResults){alert("Run analysis first!");return;}
+    const blob=new Blob([JSON.stringify(window.lastResults,null,2)],{type:"application/json"});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement("a");
+    a.href=url; a.download="ai_doc_results.json"; a.click();
+    URL.revokeObjectURL(url);
 }
 
 function downloadResults(){
