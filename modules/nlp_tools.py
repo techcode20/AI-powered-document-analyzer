@@ -88,8 +88,15 @@ JSON (fill with real values from text):
             v = ent.text.strip()
             if not v or v.lower() in seen: continue
             seen.add(v.lower())
-            buckets[MAP.get(ent.label_, "other")].append(
-                {"text": v, "label": ent.label_})
+            # Filter noise from amounts
+            bucket = MAP.get(ent.label_, "other")
+            if bucket == "amounts":
+                import re
+                is_isbn = bool(re.match(r"^97[89][\d\-]{8,}$", v))
+                is_phone = bool(re.match(r"^\+?[\d\s\(\)\-\.]{7,}$", v) and len(v) > 8)
+                if is_isbn or is_phone:
+                    continue
+            buckets[bucket].append({"text": v, "label": ent.label_})
 
     total = sum(len(v) for v in buckets.values())
     return {
@@ -111,7 +118,7 @@ def extract_keywords(text: str, top_n: int = 15) -> dict:
         EXTRA_STOPS = {
             "using","used","use","also","one","two","three","may","well",
             "will","would","could","like","make","made","get","got","good",
-            "work","worked","working","year","years","month","months","time","don","born","read","book","crazy","isbn","tel","gu32","vii","viii","ix","xi","xii","said","say","says","come","want","know","think","going","put","man","men","new","old",
+            "work","worked","working","year","years","month","months","time","don","born","read","book","crazy","isbn","tel","gu32","vii","viii","ix","xi","xii","said","say","says","come","want","know","think","going","put","man","men","new","old","don","born","read","book","crazy","isbn","tel","gu32","vii","viii","ix","xi","xii","said","say","says","come","want","know","think","going","put","man","men","new","old",
             "summary","objective","experience","education","skills","project",
             "projects","certificate","certificates","certification","resume",
             "name","email","phone","address","linkedin","github","profile",
@@ -200,7 +207,7 @@ JSON:"""
   }
   
 
-ENTITY_NOISE = {"wi-fi","wifi","isbn","cip","tel","gu32","vii","viii","ix","xi","xii","publisher","author","copyright","printed","edition"}
+ENTITY_NOISE = {"wi-fi","wifi","isbn","cip","publisher","author","copyright","wi-fi","timeless lessons","tel","gu32","vii","viii","ix","xi","xii","tel","gu32","vii","viii","ix","xi","xii","publisher","author","copyright","printed","edition"}
 
 def clean_other_entities(others):
     return [e for e in others if e.lower() not in ENTITY_NOISE and len(e) > 2]

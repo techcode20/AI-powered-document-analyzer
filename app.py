@@ -49,6 +49,27 @@ except Exception as e:
     NLP_MODEL = None
     print(f"⚠️ spaCy failed: {e}")
 
+
+# ─────────────────────────────────────────────
+# PRELOAD HEAVY MODELS AT STARTUP (speeds up requests)
+# ─────────────────────────────────────────────
+print("⏳ Loading models...")
+try:
+    from sentence_transformers import SentenceTransformer
+    SENTENCE_MODEL = SentenceTransformer("all-MiniLM-L6-v2")
+    print("✅ SentenceTransformer loaded!")
+except Exception as e:
+    SENTENCE_MODEL = None
+    print(f"⚠️ SentenceTransformer failed: {e}")
+
+try:
+    import spacy
+    NLP_MODEL = spacy.load("en_core_web_sm")
+    print("✅ spaCy loaded!")
+except Exception as e:
+    NLP_MODEL = None
+    print(f"⚠️ spaCy failed: {e}")
+
 app = Flask(__name__, static_folder="static")
 CORS(app)
 
