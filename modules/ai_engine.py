@@ -171,9 +171,13 @@ def answer_question(context: str, question: str) -> dict:
 def analyze_sentiment(text: str) -> dict:
     start = time.time()
     out = _ask(
-        "What is the sentiment of this text?\n"
-        "Reply with ONLY one word: POSITIVE, NEGATIVE, or NEUTRAL. Nothing else.\n\n"
-        f"Text: {_truncate(text, 800)}", max_tokens=5)
+        "Analyze the overall sentiment and tone of this text.\n"
+        "Rules:\n"
+        "- Books about personal growth, wealth, happiness, motivation = POSITIVE\n"
+        "- News about disasters, crime, failures = NEGATIVE\n"
+        "- Legal documents, technical manuals = NEUTRAL\n"
+        "Reply ONLY one word: POSITIVE, NEGATIVE, or NEUTRAL.\n\n"
+        f"Text: {_truncate(text, 1500)}", max_tokens=5)
     label = out.strip().upper()
     if label not in ["POSITIVE", "NEGATIVE", "NEUTRAL"]:
         label = "NEUTRAL"
