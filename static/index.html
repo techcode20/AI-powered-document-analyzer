@@ -1155,6 +1155,7 @@ async function runQA() {
   const fd = new FormData();
   fd.append('file', file);
   fd.append('question', question);
+  fd.append('history', JSON.stringify(window._qaHistory || []));
 
   try {
     const res = await fetch(`${BASE}/qa`, { method:'POST', body: fd });
@@ -1163,6 +1164,14 @@ async function runQA() {
     if (!data.success) {
       showError('qaError', data.error || 'QA failed.');
     } else {
+      // Track chat history
+      if (!window._qaHistory) window._qaHistory = [];
+      window._qaHistory.push({question: question, answer: data.answer});
+      if (window._qaHistory.length > 8) window._qaHistory.shift();
+      // Show in chat box
+      _addChatMsg('user', question);
+      _addChatMsg('bot', data.answer);
+      document.getElementById('qaQuestion').value = '';
       document.getElementById('qaQ').textContent = '❓ ' + data.question;
       document.getElementById('qaA').textContent = data.answer;
       document.getElementById('qaConf').textContent =
@@ -1378,48 +1387,7 @@ function clearChat() {
     document.getElementById('qaAnswerBox').style.display = 'none';
 }
 
-// Override runQA to add history
-const _origRunQA = window.runQA;
-window.runQA = async function() {
-    const question = document.getElementById('qaQuestion').value.trim();
-    const fileInput = document.getElementById('qaFileInput');
-    if (!question || !fileInput.files[0]) {
-        if (_origRunQA) _origRunQA();
-        return;
-    }
-    _addChatMsg('user', question);
-    document.getElementById('qaQuestion').value = '';
 
-    const fd = new FormData();
-    fd.append('file', fileInput.files[0]);
-    fd.append('question', question);
-    fd.append('history', JSON.stringify(_qaHistory));
-
-    const btn = document.getElementById('qaBtn');
-    btn.disabled = true;
-    btn.textContent = 'Thinking...';
-
-    try {
-        const res = await fetch(BASE + '/qa', {method:'POST', body:fd});
-        const data = await res.json();
-        if (data.success) {
-            const ans = data.data?.answer || data.answer || 'No answer found.';
-            _addChatMsg('bot', ans);
-            _qaHistory.push({question, answer: ans});
-            if (_qaHistory.length > 8) _qaHistory.shift();
-            // Also update old answer box
-            document.getElementById('qaQ').textContent = question;
-            document.getElementById('qaA').textContent = ans;
-        } else {
-            _addChatMsg('bot', 'Error: ' + (data.error || 'Something went wrong'));
-        }
-    } catch(e) {
-        _addChatMsg('bot', 'Network error. Check API status.');
-    } finally {
-        btn.disabled = false;
-        btn.textContent = 'Ask →';
-    }
-};
 
 </script>
 </body>
