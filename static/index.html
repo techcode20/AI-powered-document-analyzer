@@ -1164,14 +1164,6 @@ async function runQA() {
     if (!data.success) {
       showError('qaError', data.error || 'QA failed.');
     } else {
-      // Track chat history
-      if (!window._qaHistory) window._qaHistory = [];
-      window._qaHistory.push({question: question, answer: data.answer});
-      if (window._qaHistory.length > 8) window._qaHistory.shift();
-      // Show in chat box
-      _addChatMsg('user', question);
-      _addChatMsg('bot', data.answer);
-      document.getElementById('qaQuestion').value = '';
       document.getElementById('qaQ').textContent = '❓ ' + data.question;
       document.getElementById('qaA').textContent = data.answer;
       document.getElementById('qaConf').textContent =
